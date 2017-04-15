@@ -1,16 +1,34 @@
 # chisel
 
-Chisel is a fast TCP tunnel, transported over HTTP. Single executable including both client and server. Written in Go (Golang). Chisel is mainly useful for passing through firewalls, though it can also be used to provide a secure endpoint into your network. Chisel is very similar to [crowbar](https://github.com/q3k/crowbar) though achieves **much** higher [performance](#performance). **Warning** Chisel is currently beta software.
+[![GoDoc](https://godoc.org/github.com/jpillora/chisel?status.svg)](https://godoc.org/github.com/jpillora/chisel)
+
+Chisel is a fast TCP tunnel, transported over HTTP, secured via SSH. Single executable including both client and server. Written in Go (Golang). Chisel is mainly useful for passing through firewalls, though it can also be used to provide a secure endpoint into your network. Chisel is very similar to [crowbar](https://github.com/q3k/crowbar) though achieves **much** higher [performance](#performance).
 
 ![overview](https://docs.google.com/drawings/d/1p53VWxzGNfy8rjr-mW8pvisJmhkoLl82vAgctO_6f1w/pub?w=960&h=720)
+
+### Features
+
+* Easy to use
+* [Performant](#performance)*
+* [Encrypted connections](#security) using the SSH protocol (via `crypto/ssh`)
+* [Authenticated connections](#authentication); authenticated client connections with a users config file, authenticated server connections with fingerprint matching.
+* Client auto-reconnects with [exponential backoff](https://github.com/jpillora/backoff)
+* Client can create multiple tunnel endpoints over one TCP connection
+* Client can optionally pass through HTTP CONNECT proxies
+* Server optionally doubles as a [reverse proxy](http://golang.org/pkg/net/http/httputil/#NewSingleHostReverseProxy)
+* Server optionally allows [SOCKS5](https://en.wikipedia.org/wiki/SOCKS) connections (See [guide below](#socks5-guide))
 
 ### Install
 
 **Binaries**
 
-See [the latest release](https://github.com/jpillora/chisel/releases/latest)
+[![Releases](https://img.shields.io/github/release/jpillora/chisel.svg)](https://github.com/jpillora/chisel/releases) [![Releases](https://img.shields.io/github/downloads/jpillora/chisel/total.svg)](https://github.com/jpillora/chisel/releases)
+
+See [the latest release](https://github.com/jpillora/chisel/releases/latest) or download and install it now with `curl https://i.jpillora.com/chisel! | bash`
 
 **Docker**
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/jpillora/chisel.svg)](https://hub.docker.com/r/jpillora/chisel/) [![Image Size](https://images.microbadger.com/badges/image/jpillora/chisel.svg)](https://microbadger.com/images/jpillora/chisel)
 
 ```sh
 docker run --rm -it jpillora/chisel --help
@@ -21,16 +39,6 @@ docker run --rm -it jpillora/chisel --help
 ``` sh
 $ go get -v github.com/jpillora/chisel
 ```
-
-### Features
-
-* Easy to use
-* [Performant](#performance)*
-* [Encrypted connections](#security) using `crypto/ssh`
-* [Authenticated connections](#authentication); authenticated client connections with a users config file, authenticated server connections with fingerprint matching.
-* Client auto-reconnects with [exponential backoff](https://github.com/jpillora/backoff)
-* Client can create multiple tunnel endpoints over one TCP connection
-* Server optionally doubles as a [reverse proxy](http://golang.org/pkg/net/http/httputil/#NewSingleHostReverseProxy)
 
 ### Demo
 
@@ -53,117 +61,143 @@ and then visit [localhost:3000](http://localhost:3000/), we should see a directo
 
 ### Usage
 
-<tmpl,code: chisel --help>
+```
+$ chisel --help
+
+   Usage: chisel [command] [--help]
+
+   Version: X.Y.Z
+
+   Commands:
+     server - runs chisel in server mode
+     client - runs chisel in client mode
+
+   Read more:
+     https://github.com/jpillora/chisel
+
 ```
 
-	Usage: chisel [command] [--help]
+```
+$ chisel server --help
 
-	Version: 0.0.0-src
+  Usage: chisel server [options]
 
-	Commands:
-	  server - runs chisel in server mode
-	  client - runs chisel in client mode
+  Options:
 
-	Read more:
-	  https://github.com/jpillora/chisel
+    --host, Defines the HTTP listening host – the network interface
+    (defaults the environment variable HOST and falls back to 0.0.0.0).
+
+    --port, -p, Defines the HTTP listening port (defaults to the environment
+    variable PORT and fallsback to port 8080).
+
+    --key, An optional string to seed the generation of a ECDSA public
+    and private key pair. All commications will be secured using this
+    key pair. Share the subsequent fingerprint with clients to enable detection
+    of man-in-the-middle attacks (defaults to the CHISEL_KEY environment
+    variable, otherwise a new key is generate each run).
+
+    --authfile, An optional path to a users.json file. This file should
+    be an object with users defined like:
+      {
+        "<user:pass>": ["<addr-regex>","<addr-regex>"]
+      }
+    when <user> connects, their <pass> will be verified and then
+    each of the remote addresses will be compared against the list
+    of address regular expressions for a match. Addresses will
+    always come in the form "<host/ip>:<port>".
+
+    --auth, An optional string representing a single user with full
+    access, in the form of <user:pass>. This is equivalent to creating an
+    authfile with {"<user:pass>": [""]}.
+
+    --proxy, Specifies another HTTP server to proxy requests to when
+    chisel receives a normal HTTP request. Useful for hiding chisel in
+    plain sight.
+
+    --socks5, Allows client to access the internal SOCKS5 proxy. See
+    chisel client --help for more information.
+
+    --pid Generate pid file in current directory
+
+    -v, Enable verbose logging
+
+    --help, This help text
+
+  Version:
+    X.Y.Z
+
+  Read more:
+    https://github.com/jpillora/chisel
 
 ```
-</tmpl>
-
-`chisel server --help`
-
-<tmpl,code: chisel server --help>
-```
-
-	Usage: chisel server [options]
-
-	Options:
-
-	  --host, Defines the HTTP listening host – the network interface
-	  (defaults to 0.0.0.0).
-
-	  --port, Defines the HTTP listening port (defaults to 8080).
-
-	  --key, An optional string to seed the generation of a ECDSA public
-	  and private key pair. All commications will be secured using this
-	  key pair. Share this fingerprint with clients to enable detection
-	  of man-in-the-middle attacks.
-
-	  --authfile, An optional path to a users.json file. This file should
-	  be an object with users defined like:
-	    "<user:pass>": ["<addr-regex>","<addr-regex>"]
-	    when <user> connects, their <pass> will be verified and then
-	    each of the remote addresses will be compared against the list
-	    of address regular expressions for a match. Addresses will
-	    always come in the form "<host/ip>:<port>".
-
-	  --proxy, Specifies the default proxy target to use when chisel
-	  receives a normal HTTP request.
-
-	  -v, Enable verbose logging
-
-	  --help, This help text
-
-	Read more:
-	  https://github.com/jpillora/chisel
 
 ```
-</tmpl>
+$ chisel client --help
 
-`chisel client --help`
+  Usage: chisel client [options] <server> <remote> [remote] [remote] ...
 
-<tmpl,code: chisel client --help>
+  <server> is the URL to the chisel server.
+
+  <remote>s are remote connections tunnelled through the server, each of
+  which come in the form:
+
+    <local-host>:<local-port>:<remote-host>:<remote-port>
+
+    ■ local-host defaults to 0.0.0.0 (all interfaces).
+    ■ local-port defaults to remote-port.
+    ■ remote-port is required*.
+    ■ remote-host defaults to 0.0.0.0 (server localhost).
+
+    example remotes
+
+      3000
+      example.com:3000
+      3000:google.com:80
+      192.168.0.5:3000:google.com:80
+      socks
+      5000:socks
+
+    *When the chisel server has --socks5 enabled, remotes can
+    specify "socks" in place of remote-host and remote-port.
+    The default local host and port for a "socks" remote is
+    127.0.0.1:1080. Connections to this remote will terminate
+    at the server's internal SOCKS5 proxy.
+
+  Options:
+
+    --fingerprint, A *strongly recommended* fingerprint string
+    to perform host-key validation against the server's public key.
+    You may provide just a prefix of the key or the entire string.
+    Fingerprint mismatches will close the connection.
+
+    --auth, An optional username and password (client authentication)
+    in the form: "<user>:<pass>". These credentials are compared to
+    the credentials inside the server's --authfile. defaults to the
+    AUTH environment variable.
+
+    --keepalive, An optional keepalive interval. Since the underlying
+    transport is HTTP, in many instances we'll be traversing through
+    proxies, often these proxies will close idle connections. You must
+    specify a time with a unit, for example '30s' or '2m'. Defaults
+    to '0s' (disabled).
+
+    --proxy, An optional HTTP CONNECT proxy which will be used reach
+    the chisel server. Authentication can be specified inside the URL.
+    For example, http://admin:password@my-server.com:8081
+
+    --pid Generate pid file in current directory
+
+    -v, Enable verbose logging
+
+    --help, This help text
+
+  Version:
+    X.Y.Z
+
+  Read more:
+    https://github.com/jpillora/chisel
+
 ```
-
-	Usage: chisel client [options] <server> <remote> [remote] [remote] ...
-
-	server is the URL to the chisel server.
-
-	remotes are remote connections tunnelled through the server, each of
-	which come in the form:
-
-		<local-host>:<local-port>:<remote-host>:<remote-port>
-
-		* remote-port is required.
-		* local-port defaults to remote-port.
-		* local-host defaults to 0.0.0.0 (all interfaces).
-		* remote-host defaults to 0.0.0.0 (server localhost).
-
-		example remotes
-
-			3000
-			example.com:3000
-			3000:google.com:80
-			192.168.0.5:3000:google.com:80
-
-	Options:
-
-	  --fingerprint, An optional fingerprint (server authentication)
-	  string to compare against the server's public key. You may provide
-	  just a prefix of the key or the entire string. Fingerprint 
-	  mismatches will close the connection.
-
-	  --auth, An optional username and password (client authentication)
-	  in the form: "<user>:<pass>". These credentials are compared to
-	  the credentials inside the server's --authfile.
-
-	  --keepalive, An optional keepalive interval. Since the underlying
-	  transport is HTTP, in many instances we'll be traversing through
-	  proxies, often these proxies will close idle connections. You must
-	  specify a time with a unit, for example '30s' or '2m'. Defaults
-	  to '0s' (disabled).
-
-	  -v, Enable verbose logging
-
-	  --help, This help text
-
-	Read more:
-	  https://github.com/jpillora/chisel
-
-```
-</tmpl>
-
-See also [programmatic usage](https://github.com/jpillora/chisel/wiki/Programmatic-Usage).
 
 ### Security
 
@@ -174,6 +208,31 @@ Encryption is always enabled. When you start up a chisel server, it will generat
 Using the `--authfile` option, the server may optionally provide a `user.json` configuration file to create a list of accepted users. The client then authenticates using the `--auth` option. See [users.json](example/users.json) for an example authentication configuration file. See the `--help` above for more information.
 
 Internally, this is done using the *Password* authentication method provided by SSH. Learn more about `crypto/ssh` here http://blog.gopheracademy.com/go-and-ssh/.
+
+### SOCKS5 Guide
+
+1. Start your chisel server
+
+```sh
+docker run \
+  --name chisel -p 9312:9312 \
+  -d --restart always \
+  jpillora/chisel server -p 9312 --socks5 --key supersecret
+```
+
+2. Connect your chisel client (using server's fingerprint)
+
+```sh
+chisel client --fingerprint ab:12:34 server-address:9312 socks
+```
+
+3. Point your SOCKS5 clients (e.g. OS/Browser) to:
+
+```
+localhost:1080
+```
+
+4. Now you have an encrypted, authenticated SOCKS5 connection over HTTP
 
 ### Performance
 
@@ -196,32 +255,32 @@ Note, we're using an in-memory "file" server on localhost for these tests
 *direct*
 
 ```
-:3000 => 1 bytes in 1.440608ms
-:3000 => 10 bytes in 658.833µs
-:3000 => 100 bytes in 669.6µs
-:3000 => 1000 bytes in 570.242µs
-:3000 => 10000 bytes in 655.795µs
-:3000 => 100000 bytes in 693.761µs
-:3000 => 1000000 bytes in 2.156777ms
-:3000 => 10000000 bytes in 18.562896ms
-:3000 => 100000000 bytes in 146.355886ms
+:3000 => 1 bytes in 1.291417ms
+:3000 => 10 bytes in 713.525µs
+:3000 => 100 bytes in 562.48µs
+:3000 => 1000 bytes in 595.445µs
+:3000 => 10000 bytes in 1.053298ms
+:3000 => 100000 bytes in 741.351µs
+:3000 => 1000000 bytes in 1.367143ms
+:3000 => 10000000 bytes in 8.601549ms
+:3000 => 100000000 bytes in 76.3939ms
 ```
 
 `chisel`
 
 ```
-:2001 => 1 bytes in 1.393731ms
-:2001 => 10 bytes in 1.002992ms
-:2001 => 100 bytes in 1.082757ms
-:2001 => 1000 bytes in 1.096081ms
-:2001 => 10000 bytes in 1.215036ms
-:2001 => 100000 bytes in 2.09334ms
-:2001 => 1000000 bytes in 9.136138ms
-:2001 => 10000000 bytes in 84.170904ms
-:2001 => 100000000 bytes in 796.713039ms
+:2001 => 1 bytes in 1.351976ms
+:2001 => 10 bytes in 1.106086ms
+:2001 => 100 bytes in 1.005729ms
+:2001 => 1000 bytes in 1.254396ms
+:2001 => 10000 bytes in 1.139777ms
+:2001 => 100000 bytes in 2.35437ms
+:2001 => 1000000 bytes in 11.502673ms
+:2001 => 10000000 bytes in 123.130246ms
+:2001 => 100000000 bytes in 966.48636ms
 ```
 
-~100MB in **0.8 seconds**
+~100MB in **~1 second**
 
 `crowbar`
 
@@ -249,7 +308,7 @@ See more [test/](test/)
 	* PaaS providers vary in their support for WebSockets
 		* Heroku has full support
 		* Openshift has full support though connections are only accepted on ports 8443 and 8080
-		* Google App Engine has **no** support
+		* Google App Engine has **no** support (Track this on [their repo](https://code.google.com/p/googleappengine/issues/detail?id=2535))
 
 ### Contributing
 
@@ -261,20 +320,20 @@ See more [test/](test/)
 
 ### Changelog
 
-* `1.0.0` - Init
+* `1.0.0` - Initial release
 * `1.1.0` - Swapped out simple symmetric encryption for ECDSA SSH
+* `1.2.0` - Added SOCKS5 (server) and HTTP CONNECT (client) support
 
 ### Todo
 
+* Allow clients to act as an indirect tunnel endpoint for other clients
 * Better, faster tests
 * Expose a stats page for proxy throughput
 * Treat client stdin/stdout as a socket
-* Allow clients to act as an indirect tunnel endpoint for other clients
-* Keep local connections open and buffer between remote retries
 
 #### MIT License
 
-Copyright © 2015 Jaime Pillora &lt;dev@jpillora.com&gt;
+Copyright © 2017 Jaime Pillora &lt;dev@jpillora.com&gt;
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the
